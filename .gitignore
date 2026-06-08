@@ -1,0 +1,47 @@
+# Gradle
+.gradle/
+.gradle-dist/
+**/build/
+
+# Local Android SDK and generated Android files
+local.properties
+.android-sdk/
+android-sdk/
+sdk/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Generated packages
+*.apk
+*.ap_
+*.aab
+*.aar
+output-metadata.json
+
+# Signing keys and secrets
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
+signing.properties
+secrets.properties
+google-services.json
+
+# IDE files
+.idea/
+*.iml
+
+# Kotlin and Java build caches
+.kotlin/
+*.class
+
+# OS and temporary files
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.temp
+*.swp
+*~
