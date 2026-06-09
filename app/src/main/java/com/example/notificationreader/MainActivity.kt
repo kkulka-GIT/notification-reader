@@ -2,6 +2,9 @@ package com.example.notificationreader
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
@@ -15,6 +18,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
+import android.widget.Toast
 import com.example.notificationreader.debug.DebugLogEntry
 import com.example.notificationreader.debug.DebugLogStore
 import com.example.notificationreader.history.ApplicationHistorySummary
@@ -202,6 +206,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
         }
 
+        addActionButton(
+            "Logi diagnostyczne",
+            "Pokaż logi diagnostyczne"
+        ) {
+            showDiagnosticLogs()
+        }
+
         val speakingSwitch = Switch(this).apply {
             text = "Odczyt głosowy"
             textSize = 20f
@@ -223,6 +234,33 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 showSettings()
             }
         }
+    }
+
+    private fun showDiagnosticLogs() {
+        currentSection = Section.DIAGNOSTIC_LOGS
+        selectedPackageName = null
+        sectionTitleView.text = "Logi diagnostyczne"
+        updateNavigationState()
+        contentLayout.removeAllViews()
+
+        addActionButton("Wróć do ustawień", "Wróć do ustawień") { showSettings() }
+        addActionButton("Kopiuj logi", "Kopiuj wszystkie logi diagnostyczne") {
+            copyDiagnosticLogs()
+        }
+
+        val logs = DebugLogStore.all()
+        if (logs.isEmpty()) {
+            val empty = TextView(this).apply {
+                textSize = 20f
+                setTextColor(getColor(android.R.color.black))
+                setPadding(0, 24, 0, 24)
+                text = "Brak logów diagnostycznych"
+            }
+            contentLayout.addView(empty, fullWidthParams())
+            return
+        }
+
+        logs.forEach { entry -> addDebugLogEntry(entry) }
     }
 
     private fun addRecordRow(record: NotificationHistoryRecord) {
@@ -419,6 +457,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
             }
             Section.SETTINGS -> showSettings()
+            Section.DIAGNOSTIC_LOGS -> showDiagnosticLogs()
         }
     }
 
@@ -435,6 +474,24 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         recentButton.isEnabled = currentSection != Section.RECENT
         appsButton.isEnabled = currentSection != Section.APPLICATIONS && currentSection != Section.APPLICATION_DETAILS
         settingsButton.isEnabled = currentSection != Section.SETTINGS
+    }
+
+    private fun copyDiagnosticLogs() {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Logi diagnostyczne", diagnosticLogsText()))
+        Toast.makeText(this, "Skopiowano logi", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun diagnosticLogsText(): String {
+        val header = listOf(
+            "App version: ${BuildConfig.VERSION_NAME}",
+            "Build type: ${BuildConfig.BUILD_TYPE}",
+            "Current time: ${formatTime(System.currentTimeMillis())}"
+        )
+        val logs = DebugLogStore.all().map { entry ->
+            "${formatTime(entry.timestamp)} | ${entry.stage} | ${entry.message}"
+        }
+        return (header + logs).joinToString("\n")
     }
 
     private fun confirm(title: String, message: String, onConfirmed: () -> Unit) {
@@ -496,6 +553,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         RECENT,
         APPLICATIONS,
         APPLICATION_DETAILS,
-        SETTINGS
+        SETTINGS,
+        DIAGNOSTIC_LOGS
     }
 }

@@ -16,6 +16,10 @@ android {
         jvmTarget = "1.8"
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     defaultConfig {
         applicationId = "com.example.notificationreader"
         minSdk = 26

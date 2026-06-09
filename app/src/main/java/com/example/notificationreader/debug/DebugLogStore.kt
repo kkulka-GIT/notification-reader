@@ -23,4 +23,9 @@ object DebugLogStore {
     fun forNotification(notificationKey: String): List<DebugLogEntry> {
         return entries.filter { it.notificationKey == notificationKey }
     }
+
+    @Synchronized
+    fun all(): List<DebugLogEntry> {
+        return entries.toList()
+    }
 }
