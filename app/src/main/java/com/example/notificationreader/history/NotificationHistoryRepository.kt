@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
+import com.example.notificationreader.debug.DebugLogStore
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -27,8 +28,10 @@ class NotificationHistoryRepository private constructor(context: Context) {
         )
         if (inserted != -1L) {
             trimToLimit(db)
+            DebugLogStore.add(record.notificationKey, "SAVED", "${record.packageName} | ${record.title} | ${record.text}")
             return true
         }
+        DebugLogStore.add(record.notificationKey, "SKIPPED", "History insert ignored")
         return false
     }
 

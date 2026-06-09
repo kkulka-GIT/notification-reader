@@ -3,6 +3,7 @@ package com.example.notificationreader
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.speech.tts.TextToSpeech
+import com.example.notificationreader.debug.DebugLogStore
 import com.example.notificationreader.history.NotificationHistoryDuplicatePolicy
 import com.example.notificationreader.history.NotificationHistoryExtractor
 import com.example.notificationreader.history.NotificationHistoryRepository
@@ -38,15 +39,29 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (sbn.packageName == packageName) return
+        DebugLogStore.add(sbn.key, "RECEIVED", receivedMessage(sbn))
+
         val historyRecord = NotificationHistoryExtractor.fromStatusBarNotification(applicationContext, sbn)
-        if (historyRecord != null && historyDuplicatePolicy.shouldStore(historyRecord.storageKey)) {
-            historyRepository.saveAsync(historyRecord)
+        if (historyRecord != null) {
+            DebugLogStore.add(sbn.key, "EXTRACTED", historyMessage(historyRecord.title, historyRecord.text))
+            if (historyDuplicatePolicy.shouldStore(historyRecord.storageKey)) {
+                historyRepository.saveAsync(historyRecord)
+            } else {
+                DebugLogStore.add(sbn.key, "SKIPPED", "Duplicate history record")
+            }
+        } else {
+            DebugLogStore.add(sbn.key, "SKIPPED", "Empty notification history record")
         }
 
         if (!NotificationSpeechPrefs.isSpeakingEnabled(applicationContext)) return
-        if (isDuplicate(sbn.key)) return
+        if (isDuplicate(sbn.key)) {
+            DebugLogStore.add(sbn.key, "SKIPPED", "Duplicate speech notification")
+            return
+        }
 
-        speak(MessageNotificationSpeechPath.messageFor(sbn) ?: NotificationAnnouncementMapper.messageFor(sbn))
+        val speechMessage = MessageNotificationSpeechPath.messageFor(sbn) ?: NotificationAnnouncementMapper.messageFor(sbn)
+        DebugLogStore.add(sbn.key, "SPOKEN", speechMessage)
+        speak(speechMessage)
     }
 
     override fun onDestroy() {
@@ -78,6 +93,17 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
         while (pendingMessages.size > MAX_PENDING_MESSAGES) {
             pendingMessages.removeFirst()
         }
+    }
+
+    private fun receivedMessage(sbn: StatusBarNotification): String {
+        val extras = sbn.notification?.extras
+        val title = extras?.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString().orEmpty()
+        val text = extras?.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString().orEmpty()
+        return "${sbn.packageName} | $title | $text"
+    }
+
+    private fun historyMessage(title: String, text: String): String {
+        return "$title | $text"
     }
 
     private fun isDuplicate(key: String): Boolean {

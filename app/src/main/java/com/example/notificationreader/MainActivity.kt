@@ -15,6 +15,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
+import com.example.notificationreader.debug.DebugLogEntry
+import com.example.notificationreader.debug.DebugLogStore
 import com.example.notificationreader.history.ApplicationHistorySummary
 import com.example.notificationreader.history.NotificationHistoryRecord
 import com.example.notificationreader.history.NotificationHistoryRepository
@@ -266,6 +268,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         addDetailField("Tekst rozszerzony", record.expandedText)
         addDetailField("Podtekst", record.subText)
         addDetailField("Zawiera obraz lub dużą ikonę", if (record.hasImageOrLargeIcon) "Tak" else "Nie")
+        addDebugLogs(record)
 
         addActionButton("Odczytaj", "Odczytaj wybrane zapisane powiadomienie") {
             speakRecord(record)
@@ -313,6 +316,40 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setTextColor(getColor(android.R.color.black))
             setPadding(0, 8, 0, 8)
             text = "$label: $textValue"
+        }
+        contentLayout.addView(view, fullWidthParams())
+    }
+
+    private fun addDebugLogs(record: NotificationHistoryRecord) {
+        val title = TextView(this).apply {
+            textSize = 20f
+            setTextColor(getColor(android.R.color.black))
+            setPadding(0, 20, 0, 8)
+            text = "Debug logi"
+        }
+        contentLayout.addView(title, fullWidthParams())
+
+        val logs = DebugLogStore.forNotification(record.notificationKey)
+        if (logs.isEmpty()) {
+            val empty = TextView(this).apply {
+                textSize = 16f
+                setTextColor(getColor(android.R.color.black))
+                setPadding(0, 4, 0, 8)
+                text = "Brak logów debug"
+            }
+            contentLayout.addView(empty, fullWidthParams())
+            return
+        }
+
+        logs.forEach { entry -> addDebugLogEntry(entry) }
+    }
+
+    private fun addDebugLogEntry(entry: DebugLogEntry) {
+        val view = TextView(this).apply {
+            textSize = 16f
+            setTextColor(getColor(android.R.color.black))
+            setPadding(0, 4, 0, 4)
+            text = "${formatTime(entry.timestamp)} | ${entry.stage} | ${entry.message}"
         }
         contentLayout.addView(view, fullWidthParams())
     }
