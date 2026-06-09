@@ -3,6 +3,10 @@ package com.example.notificationreader
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.speech.tts.TextToSpeech
+import com.example.notificationreader.history.NotificationHistoryDuplicatePolicy
+import com.example.notificationreader.history.NotificationHistoryExtractor
+import com.example.notificationreader.history.NotificationHistoryRepository
+import com.example.notificationreader.message.MessageNotificationSpeechPath
 import java.util.ArrayDeque
 import java.util.Locale
 
@@ -12,9 +16,12 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
     private val pendingMessages = ArrayDeque<String>()
     private val recentNotificationKeys = ArrayDeque<String>()
     private val recentNotificationKeySet = LinkedHashSet<String>()
+    private val historyDuplicatePolicy = NotificationHistoryDuplicatePolicy()
+    private lateinit var historyRepository: NotificationHistoryRepository
 
     override fun onCreate() {
         super.onCreate()
+        historyRepository = NotificationHistoryRepository.getInstance(applicationContext)
         tts = TextToSpeech(applicationContext, this)
     }
 
@@ -30,10 +37,16 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        if (sbn.packageName == packageName) return
+        val historyRecord = NotificationHistoryExtractor.fromStatusBarNotification(applicationContext, sbn)
+        if (historyRecord != null && historyDuplicatePolicy.shouldStore(historyRecord.storageKey)) {
+            historyRepository.saveAsync(historyRecord)
+        }
+
         if (!NotificationSpeechPrefs.isSpeakingEnabled(applicationContext)) return
         if (isDuplicate(sbn.key)) return
 
-        speak(NotificationAnnouncementMapper.messageFor(sbn))
+        speak(MessageNotificationSpeechPath.messageFor(sbn) ?: NotificationAnnouncementMapper.messageFor(sbn))
     }
 
     override fun onDestroy() {

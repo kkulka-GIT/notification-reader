@@ -34,4 +34,9 @@ object NotificationAnnouncementMapper {
             else -> "Nowe powiadomienie z aplikacji"
         }
     }
+
+    fun isSupportedMessagePackage(packageName: String): Boolean {
+        val normalizedPackageName = packageName.lowercase(Locale.US)
+        return normalizedPackageName in messengerPackages || normalizedPackageName in smsPackages
+    }
 }

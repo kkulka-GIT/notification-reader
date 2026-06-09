@@ -24,3 +24,8 @@ android {
         versionName = "1.0"
     }
 }
+
+dependencies {
+    testImplementation(files(rootProject.file(".gradle-dist/gradle-8.10.2/lib/junit-4.13.2.jar")))
+    testImplementation(files(rootProject.file(".gradle-dist/gradle-8.10.2/lib/hamcrest-core-1.3.jar")))
+}
