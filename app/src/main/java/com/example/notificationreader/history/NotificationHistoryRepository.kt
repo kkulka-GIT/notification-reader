@@ -28,11 +28,32 @@ class NotificationHistoryRepository private constructor(context: Context) {
         )
         if (inserted != -1L) {
             trimToLimit(db)
-            DebugLogStore.add(record.notificationKey, "SAVED", "${record.packageName} | ${record.title} | ${record.text}")
+            DebugLogStore.add(record.notificationKey, "SAVED", historyLogMessage(record))
             return true
         }
-        DebugLogStore.add(record.notificationKey, "SKIPPED", "History insert ignored")
-        return false
+
+        val existing = findByStorageKey(db, record.storageKey)
+        return when (NotificationHistoryUpsertPolicy.actionFor(existing, record)) {
+            NotificationHistoryUpsertAction.SAVED -> {
+                DebugLogStore.add(record.notificationKey, "SAVED", historyLogMessage(record))
+                true
+            }
+            NotificationHistoryUpsertAction.UPDATED -> {
+                db.update(
+                    TABLE,
+                    record.toContentValues(),
+                    "id = ?",
+                    arrayOf(requireNotNull(existing).id.toString())
+                )
+                trimToLimit(db)
+                DebugLogStore.add(record.notificationKey, "UPDATED", historyLogMessage(record))
+                true
+            }
+            NotificationHistoryUpsertAction.UNCHANGED -> {
+                DebugLogStore.add(record.notificationKey, "UNCHANGED", historyLogMessage(record))
+                false
+            }
+        }
     }
 
     fun newest(limit: Int = NotificationHistoryLimitPolicy.MAX_RECORDS): List<NotificationHistoryRecord> {
@@ -128,6 +149,26 @@ class NotificationHistoryRepository private constructor(context: Context) {
             while (c.moveToNext()) records.add(c.toRecord())
             records
         }
+    }
+
+    private fun findByStorageKey(db: SQLiteDatabase, storageKey: String): NotificationHistoryRecord? {
+        val cursor = db.query(
+            TABLE,
+            RECORD_COLUMNS,
+            "storage_key = ?",
+            arrayOf(storageKey),
+            null,
+            null,
+            null,
+            "1"
+        )
+        return cursor.use { c ->
+            if (c.moveToNext()) c.toRecord() else null
+        }
+    }
+
+    private fun historyLogMessage(record: NotificationHistoryRecord): String {
+        return "${record.packageName} | ${record.title} | ${record.text} | storageKey=${record.storageKey}"
     }
 
     private fun trimToLimit(db: SQLiteDatabase) {

@@ -4,7 +4,6 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.speech.tts.TextToSpeech
 import com.example.notificationreader.debug.DebugLogStore
-import com.example.notificationreader.history.NotificationHistoryDuplicatePolicy
 import com.example.notificationreader.history.NotificationHistoryExtractor
 import com.example.notificationreader.history.NotificationHistoryRepository
 import com.example.notificationreader.history.NotificationHistoryRecord
@@ -16,7 +15,6 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private val pendingMessages = ArrayDeque<String>()
-    private val historyDuplicatePolicy = NotificationHistoryDuplicatePolicy()
     private val speechDuplicatePolicy = NotificationSpeechDuplicatePolicy()
     private lateinit var historyRepository: NotificationHistoryRepository
 
@@ -44,11 +42,7 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
         val historyRecord = NotificationHistoryExtractor.fromStatusBarNotification(applicationContext, sbn)
         if (historyRecord != null) {
             DebugLogStore.add(sbn.key, "EXTRACTED", historyMessage(historyRecord))
-            if (historyDuplicatePolicy.shouldStore(historyRecord.storageKey)) {
-                historyRepository.saveAsync(historyRecord)
-            } else {
-                DebugLogStore.add(sbn.key, "SKIPPED", "Duplicate history record | storageKey=${historyRecord.storageKey}")
-            }
+            historyRepository.saveAsync(historyRecord)
         } else {
             DebugLogStore.add(sbn.key, "SKIPPED", "Empty notification history record")
         }
