@@ -5,8 +5,10 @@ import android.service.notification.StatusBarNotification
 import android.speech.tts.TextToSpeech
 import com.example.notificationreader.debug.DebugLogStore
 import com.example.notificationreader.history.NotificationHistoryExtractor
+import com.example.notificationreader.history.NotificationHistoryInterpretationAction
+import com.example.notificationreader.history.NotificationHistoryInterpreter
 import com.example.notificationreader.history.NotificationHistoryRepository
-import com.example.notificationreader.history.NotificationHistoryRecord
+import com.example.notificationreader.history.RawNotificationEvent
 import com.example.notificationreader.message.MessageNotificationSpeechPath
 import java.util.ArrayDeque
 import java.util.Locale
@@ -16,6 +18,7 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
     private var ttsReady = false
     private val pendingMessages = ArrayDeque<String>()
     private val speechDuplicatePolicy = NotificationSpeechDuplicatePolicy()
+    private val historyInterpreter = NotificationHistoryInterpreter()
     private lateinit var historyRepository: NotificationHistoryRepository
 
     override fun onCreate() {
@@ -39,10 +42,24 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
         if (sbn.packageName == packageName) return
         DebugLogStore.add(sbn.key, "RECEIVED", receivedMessage(sbn))
 
-        val historyRecord = NotificationHistoryExtractor.fromStatusBarNotification(applicationContext, sbn)
-        if (historyRecord != null) {
-            DebugLogStore.add(sbn.key, "EXTRACTED", historyMessage(historyRecord))
-            historyRepository.saveAsync(historyRecord)
+        val rawEvent = NotificationHistoryExtractor.rawEventFromStatusBarNotification(applicationContext, sbn)
+        if (rawEvent != null) {
+            DebugLogStore.add(sbn.key, "EXTRACTED", rawEventMessage(rawEvent))
+            val interpretation = historyInterpreter.interpret(rawEvent)
+            DebugLogStore.add(
+                sbn.key,
+                interpretation.action.name,
+                "${interpretation.reason} | notificationKey=${rawEvent.notificationKey}"
+            )
+            when (interpretation.action) {
+                NotificationHistoryInterpretationAction.IGNORE -> {
+                    DebugLogStore.add(sbn.key, "SKIPPED", interpretation.reason)
+                }
+                NotificationHistoryInterpretationAction.CREATE,
+                NotificationHistoryInterpretationAction.UPDATE -> {
+                    historyRepository.saveAsync(requireNotNull(interpretation.record))
+                }
+            }
         } else {
             DebugLogStore.add(sbn.key, "SKIPPED", "Empty notification history record")
         }
@@ -116,8 +133,10 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
         return "${sbn.packageName} | $title | $text"
     }
 
-    private fun historyMessage(record: NotificationHistoryRecord): String {
-        return "${record.title} | ${record.text} | storageKey=${record.storageKey}"
+    private fun rawEventMessage(event: RawNotificationEvent): String {
+        return "${event.packageName} | ${event.title} | ${event.text} | category=${event.category} | " +
+            "id=${event.notificationId} | tag=${event.tag} | groupKey=${event.groupKey} | " +
+            "isGroupSummary=${event.isGroupSummary} | hasImageOrLargeIcon=${event.hasImageOrLargeIcon}"
     }
 
     companion object {

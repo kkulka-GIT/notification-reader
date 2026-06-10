@@ -6,11 +6,11 @@ import android.os.Build
 import android.service.notification.StatusBarNotification
 
 object NotificationHistoryExtractor {
-    fun fromStatusBarNotification(
+    fun rawEventFromStatusBarNotification(
         context: Context,
         sbn: StatusBarNotification,
-        savedAt: Long = System.currentTimeMillis()
-    ): NotificationHistoryRecord? {
+        receivedAt: Long = System.currentTimeMillis()
+    ): RawNotificationEvent? {
         if (sbn.packageName == context.packageName) return null
 
         val notification = sbn.notification ?: return null
@@ -18,37 +18,37 @@ object NotificationHistoryExtractor {
         val packageName = NotificationTextNormalizer.normalize(sbn.packageName)
         if (packageName.isEmpty()) return null
 
-        val title = NotificationTextNormalizer.normalize(extras.getCharSequence(Notification.EXTRA_TITLE))
-        val text = NotificationTextNormalizer.normalize(extras.getCharSequence(Notification.EXTRA_TEXT))
-        val expandedText = NotificationTextNormalizer.normalize(
-            extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
-                ?: extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)
-        )
-        val subText = NotificationTextNormalizer.normalize(extras.getCharSequence(Notification.EXTRA_SUB_TEXT))
-        val notificationKey = NotificationTextNormalizer.normalize(sbn.key)
-        val candidate = NotificationHistoryCandidate(
-            notificationKey = notificationKey,
-            packageName = packageName,
-            title = title,
-            text = text,
-            expandedText = expandedText,
-            subText = subText,
-            postedAt = sbn.postTime
-        )
-
-        return NotificationHistoryRecord(
-            notificationKey = notificationKey,
+        return RawNotificationEvent(
+            receivedAt = receivedAt,
+            postedAt = sbn.postTime,
+            notificationKey = NotificationTextNormalizer.normalize(sbn.key),
             packageName = packageName,
             applicationName = ApplicationNameResolver.resolve(context, packageName),
-            title = title,
-            text = text,
-            expandedText = expandedText,
-            subText = subText,
-            postedAt = sbn.postTime,
-            savedAt = savedAt,
-            hasImageOrLargeIcon = hasImageOrLargeIcon(notification),
-            storageKey = NotificationHistoryStorageKey.from(candidate)
+            title = NotificationTextNormalizer.normalize(extras.getCharSequence(Notification.EXTRA_TITLE)),
+            text = NotificationTextNormalizer.normalize(extras.getCharSequence(Notification.EXTRA_TEXT)),
+            expandedText = NotificationTextNormalizer.normalize(
+                extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
+                    ?: extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)
+            ),
+            subText = NotificationTextNormalizer.normalize(extras.getCharSequence(Notification.EXTRA_SUB_TEXT)),
+            category = NotificationTextNormalizer.normalize(notification.category),
+            notificationId = sbn.id,
+            tag = NotificationTextNormalizer.normalize(sbn.tag),
+            groupKey = NotificationTextNormalizer.normalize(sbn.groupKey),
+            isGroupSummary = notification.flags and Notification.FLAG_GROUP_SUMMARY != 0,
+            hasImageOrLargeIcon = hasImageOrLargeIcon(notification)
         )
+    }
+
+    fun fromStatusBarNotification(
+        context: Context,
+        sbn: StatusBarNotification,
+        savedAt: Long = System.currentTimeMillis()
+    ): NotificationHistoryRecord? {
+        val rawEvent = rawEventFromStatusBarNotification(context, sbn, savedAt) ?: return null
+        return NotificationHistoryInterpreter(duplicateWindowMillis = -1L)
+            .interpret(rawEvent)
+            .record
     }
 
     private fun hasImageOrLargeIcon(notification: Notification): Boolean {

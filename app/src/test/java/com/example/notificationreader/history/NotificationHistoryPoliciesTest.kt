@@ -31,10 +31,9 @@ class NotificationHistoryPoliciesTest {
     }
 
     @Test
-    fun storageKeyUsesNotificationKeyWhenAvailable() {
+    fun storageKeyUsesMeaningfulNotificationFields() {
         val key = NotificationHistoryStorageKey.from(
             NotificationHistoryCandidate(
-                notificationKey = "abc",
                 packageName = "pkg",
                 title = "title",
                 text = "text",
@@ -44,14 +43,13 @@ class NotificationHistoryPoliciesTest {
             )
         )
 
-        assertEquals("key:abc", key)
+        assertEquals("event|pkg|12|title|text|big|sub", key)
     }
 
     @Test
-    fun storageKeyFallsBackToNotificationFields() {
+    fun storageKeyDoesNotUseAndroidNotificationKey() {
         val key = NotificationHistoryStorageKey.from(
             NotificationHistoryCandidate(
-                notificationKey = "",
                 packageName = "pkg",
                 title = "title",
                 text = "text",
@@ -61,7 +59,7 @@ class NotificationHistoryPoliciesTest {
             )
         )
 
-        assertEquals("fallback|pkg|12|title|text|big|sub", key)
+        assertEquals("event|pkg|12|title|text|big|sub", key)
     }
 
     @Test

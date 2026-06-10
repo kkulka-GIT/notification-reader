@@ -4,7 +4,6 @@ import java.util.ArrayDeque
 import java.util.LinkedHashSet
 
 data class NotificationHistoryCandidate(
-    val notificationKey: String,
     val packageName: String,
     val title: String,
     val text: String,
@@ -15,19 +14,28 @@ data class NotificationHistoryCandidate(
 
 object NotificationHistoryStorageKey {
     fun from(candidate: NotificationHistoryCandidate): String {
-        return if (candidate.notificationKey.isNotEmpty()) {
-            "key:${candidate.notificationKey}"
-        } else {
-            listOf(
-                "fallback",
-                candidate.packageName,
-                candidate.postedAt.toString(),
-                candidate.title,
-                candidate.text,
-                candidate.expandedText,
-                candidate.subText
-            ).joinToString("|")
-        }
+        return listOf(
+            "event",
+            candidate.packageName,
+            candidate.postedAt.toString(),
+            candidate.title,
+            candidate.text,
+            candidate.expandedText,
+            candidate.subText
+        ).joinToString("|")
+    }
+
+    fun from(event: RawNotificationEvent): String {
+        return from(
+            NotificationHistoryCandidate(
+                packageName = event.packageName,
+                title = event.title,
+                text = event.text,
+                expandedText = event.expandedText,
+                subText = event.subText,
+                postedAt = event.postedAt
+            )
+        )
     }
 }
 
