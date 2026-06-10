@@ -7,6 +7,7 @@ import com.example.notificationreader.debug.DebugLogStore
 import com.example.notificationreader.history.NotificationHistoryDuplicatePolicy
 import com.example.notificationreader.history.NotificationHistoryExtractor
 import com.example.notificationreader.history.NotificationHistoryRepository
+import com.example.notificationreader.history.NotificationHistoryRecord
 import com.example.notificationreader.message.MessageNotificationSpeechPath
 import java.util.ArrayDeque
 import java.util.Locale
@@ -15,9 +16,8 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private val pendingMessages = ArrayDeque<String>()
-    private val recentNotificationKeys = ArrayDeque<String>()
-    private val recentNotificationKeySet = LinkedHashSet<String>()
     private val historyDuplicatePolicy = NotificationHistoryDuplicatePolicy()
+    private val speechDuplicatePolicy = NotificationSpeechDuplicatePolicy()
     private lateinit var historyRepository: NotificationHistoryRepository
 
     override fun onCreate() {
@@ -43,24 +43,44 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
 
         val historyRecord = NotificationHistoryExtractor.fromStatusBarNotification(applicationContext, sbn)
         if (historyRecord != null) {
-            DebugLogStore.add(sbn.key, "EXTRACTED", historyMessage(historyRecord.title, historyRecord.text))
+            DebugLogStore.add(sbn.key, "EXTRACTED", historyMessage(historyRecord))
             if (historyDuplicatePolicy.shouldStore(historyRecord.storageKey)) {
                 historyRepository.saveAsync(historyRecord)
             } else {
-                DebugLogStore.add(sbn.key, "SKIPPED", "Duplicate history record")
+                DebugLogStore.add(sbn.key, "SKIPPED", "Duplicate history record | storageKey=${historyRecord.storageKey}")
             }
         } else {
             DebugLogStore.add(sbn.key, "SKIPPED", "Empty notification history record")
         }
 
         if (!NotificationSpeechPrefs.isSpeakingEnabled(applicationContext)) return
-        if (isDuplicate(sbn.key)) {
-            DebugLogStore.add(sbn.key, "SKIPPED", "Duplicate speech notification")
-            return
+        val speechFingerprint = NotificationSpeechFingerprint.fromStatusBarNotification(sbn)
+        when (speechDuplicatePolicy.evaluate(sbn.key, speechFingerprint)) {
+            NotificationSpeechDuplicateDecision.Allow -> Unit
+            NotificationSpeechDuplicateDecision.DuplicateNotificationKey -> {
+                DebugLogStore.add(
+                    sbn.key,
+                    "SKIPPED",
+                    "Duplicate speech notification key | notificationKey=${sbn.key} | speechFingerprint=" + speechFingerprint
+                )
+                return
+            }
+            NotificationSpeechDuplicateDecision.DuplicateFingerprintWithinWindow -> {
+                DebugLogStore.add(
+                    sbn.key,
+                    "SKIPPED",
+                    "Duplicate speech fingerprint within 5 seconds | notificationKey=${sbn.key} | speechFingerprint=" + speechFingerprint
+                )
+                return
+            }
         }
 
         val speechMessage = MessageNotificationSpeechPath.messageFor(sbn) ?: NotificationAnnouncementMapper.messageFor(sbn)
-        DebugLogStore.add(sbn.key, "SPOKEN", speechMessage)
+        DebugLogStore.add(
+            sbn.key,
+            "SPOKEN",
+            speechMessage + " | notificationKey=${sbn.key} | speechFingerprint=" + speechFingerprint
+        )
         speak(speechMessage)
     }
 
@@ -102,22 +122,11 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
         return "${sbn.packageName} | $title | $text"
     }
 
-    private fun historyMessage(title: String, text: String): String {
-        return "$title | $text"
-    }
-
-    private fun isDuplicate(key: String): Boolean {
-        if (!recentNotificationKeySet.add(key)) return true
-
-        recentNotificationKeys.addLast(key)
-        while (recentNotificationKeys.size > MAX_RECENT_NOTIFICATIONS) {
-            recentNotificationKeySet.remove(recentNotificationKeys.removeFirst())
-        }
-        return false
+    private fun historyMessage(record: NotificationHistoryRecord): String {
+        return "${record.title} | ${record.text} | storageKey=${record.storageKey}"
     }
 
     companion object {
         private const val MAX_PENDING_MESSAGES = 8
-        private const val MAX_RECENT_NOTIFICATIONS = 32
     }
 }
