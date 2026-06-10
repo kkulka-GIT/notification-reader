@@ -11,8 +11,15 @@ enum class NotificationHistoryInterpretationAction {
 data class NotificationHistoryInterpretation(
     val action: NotificationHistoryInterpretationAction,
     val reason: String,
+    val explanation: String,
     val record: NotificationHistoryRecord? = null
-)
+) {
+    val shouldWriteHistory: Boolean
+        get() = action != NotificationHistoryInterpretationAction.IGNORE && record != null
+
+    val shouldSpeak: Boolean
+        get() = action != NotificationHistoryInterpretationAction.IGNORE
+}
 
 class NotificationHistoryInterpreter(
     private val duplicateWindowMillis: Long = DEFAULT_DUPLICATE_WINDOW_MILLIS
@@ -21,10 +28,24 @@ class NotificationHistoryInterpreter(
 
     @Synchronized
     fun interpret(event: RawNotificationEvent): NotificationHistoryInterpretation {
+        if (event.packageName == SYSTEM_UI_PACKAGE_NAME) {
+            return ignored(
+                reason = "IGNORE_SYSTEM",
+                explanation = "Android SystemUI notification is technical and excluded from user outputs"
+            )
+        }
+
+        if (event.category == SERVICE_CATEGORY) {
+            return ignored(
+                reason = "IGNORE_SERVICE",
+                explanation = "Android service notification is technical and excluded from user outputs"
+            )
+        }
+
         if (event.title.isEmpty() && event.text.isEmpty()) {
-            return NotificationHistoryInterpretation(
-                action = NotificationHistoryInterpretationAction.IGNORE,
-                reason = "IGNORE_EMPTY"
+            return ignored(
+                reason = "IGNORE_EMPTY",
+                explanation = "Notification has no title or text to present to the user"
             )
         }
 
@@ -38,6 +59,7 @@ class NotificationHistoryInterpreter(
             return NotificationHistoryInterpretation(
                 action = NotificationHistoryInterpretationAction.UPDATE,
                 reason = "DUPLICATE_WITHIN_WINDOW",
+                explanation = "Repeated meaningful notification updates the existing history record",
                 record = record
             )
         }
@@ -45,7 +67,16 @@ class NotificationHistoryInterpreter(
         return NotificationHistoryInterpretation(
             action = NotificationHistoryInterpretationAction.CREATE,
             reason = "MEANINGFUL_NOTIFICATION",
+            explanation = "Meaningful notification is allowed for user outputs",
             record = record
+        )
+    }
+
+    private fun ignored(reason: String, explanation: String): NotificationHistoryInterpretation {
+        return NotificationHistoryInterpretation(
+            action = NotificationHistoryInterpretationAction.IGNORE,
+            reason = reason,
+            explanation = explanation
         )
     }
 
@@ -77,6 +108,8 @@ class NotificationHistoryInterpreter(
 
     companion object {
         const val DEFAULT_DUPLICATE_WINDOW_MILLIS = 5_000L
+        private const val SYSTEM_UI_PACKAGE_NAME = "com.android.systemui"
+        private const val SERVICE_CATEGORY = "service"
     }
 }
 

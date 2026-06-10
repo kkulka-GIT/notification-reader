@@ -5,6 +5,7 @@ import android.service.notification.StatusBarNotification
 import android.speech.tts.TextToSpeech
 import com.example.notificationreader.debug.DebugLogStore
 import com.example.notificationreader.history.NotificationHistoryExtractor
+import com.example.notificationreader.history.NotificationHistoryInterpretation
 import com.example.notificationreader.history.NotificationHistoryInterpretationAction
 import com.example.notificationreader.history.NotificationHistoryInterpreter
 import com.example.notificationreader.history.NotificationHistoryRepository
@@ -43,27 +44,27 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
         DebugLogStore.add(sbn.key, "RECEIVED", receivedMessage(sbn))
 
         val rawEvent = NotificationHistoryExtractor.rawEventFromStatusBarNotification(applicationContext, sbn)
-        if (rawEvent != null) {
-            DebugLogStore.add(sbn.key, "EXTRACTED", rawEventMessage(rawEvent))
-            val interpretation = historyInterpreter.interpret(rawEvent)
-            DebugLogStore.add(
-                sbn.key,
-                interpretation.action.name,
-                "${interpretation.reason} | notificationKey=${rawEvent.notificationKey}"
-            )
-            when (interpretation.action) {
-                NotificationHistoryInterpretationAction.IGNORE -> {
-                    DebugLogStore.add(sbn.key, "SKIPPED", interpretation.reason)
-                }
-                NotificationHistoryInterpretationAction.CREATE,
-                NotificationHistoryInterpretationAction.UPDATE -> {
+        if (rawEvent == null) {
+            DebugLogStore.add(sbn.key, "SKIPPED", "Raw notification event could not be extracted")
+            return
+        }
+
+        DebugLogStore.add(sbn.key, "EXTRACTED", rawEventMessage(rawEvent))
+        val interpretation = historyInterpreter.interpret(rawEvent)
+        DebugLogStore.add(sbn.key, interpretation.action.name, interpretationMessage(interpretation, rawEvent))
+        when (interpretation.action) {
+            NotificationHistoryInterpretationAction.IGNORE -> {
+                DebugLogStore.add(sbn.key, "SKIPPED", skippedInterpretationMessage(interpretation, rawEvent))
+            }
+            NotificationHistoryInterpretationAction.CREATE,
+            NotificationHistoryInterpretationAction.UPDATE -> {
+                if (interpretation.shouldWriteHistory) {
                     historyRepository.saveAsync(requireNotNull(interpretation.record))
                 }
             }
-        } else {
-            DebugLogStore.add(sbn.key, "SKIPPED", "Empty notification history record")
         }
 
+        if (!interpretation.shouldSpeak) return
         if (!NotificationSpeechPrefs.isSpeakingEnabled(applicationContext)) return
         val speechFingerprint = NotificationSpeechFingerprint.fromStatusBarNotification(sbn)
         when (speechDuplicatePolicy.evaluate(sbn.key, speechFingerprint)) {
@@ -124,6 +125,26 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
         while (pendingMessages.size > MAX_PENDING_MESSAGES) {
             pendingMessages.removeFirst()
         }
+    }
+
+    private fun interpretationMessage(
+        interpretation: NotificationHistoryInterpretation,
+        event: RawNotificationEvent
+    ): String {
+        return "action=" + interpretation.action.name + " | reason=" + interpretation.reason +
+            " | explanation=" + interpretation.explanation + " | " +
+            "notificationKey=" + event.notificationKey + " | packageName=" + event.packageName +
+            " | category=" + event.category
+    }
+
+    private fun skippedInterpretationMessage(
+        interpretation: NotificationHistoryInterpretation,
+        event: RawNotificationEvent
+    ): String {
+        return "action=" + interpretation.action.name + " | reason=" + interpretation.reason +
+            " | explanation=" + interpretation.explanation + " | " +
+            "notificationKey=" + event.notificationKey + " | packageName=" + event.packageName +
+            " | category=" + event.category
     }
 
     private fun receivedMessage(sbn: StatusBarNotification): String {

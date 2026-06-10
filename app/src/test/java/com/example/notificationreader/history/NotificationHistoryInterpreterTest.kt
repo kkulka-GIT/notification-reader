@@ -1,6 +1,7 @@
 package com.example.notificationreader.history
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -13,6 +14,8 @@ class NotificationHistoryInterpreterTest {
 
         assertEquals(NotificationHistoryInterpretationAction.IGNORE, result.action)
         assertEquals("IGNORE_EMPTY", result.reason)
+        assertFalse(result.shouldWriteHistory)
+        assertFalse(result.shouldSpeak)
         assertNull(result.record)
     }
 
@@ -22,6 +25,8 @@ class NotificationHistoryInterpreterTest {
 
         assertEquals(NotificationHistoryInterpretationAction.CREATE, result.action)
         assertEquals("MEANINGFUL_NOTIFICATION", result.reason)
+        assertTrue(result.shouldWriteHistory)
+        assertTrue(result.shouldSpeak)
         assertEquals("Mail", result.record?.title)
         assertEquals("Hello", result.record?.text)
     }
@@ -84,6 +89,65 @@ class NotificationHistoryInterpreterTest {
         assertEquals("group", event.groupKey)
         assertTrue(event.isGroupSummary)
         assertTrue(event.hasImageOrLargeIcon)
+    }
+
+    @Test
+    fun systemUiNotificationIsIgnoredForHistoryAndSpeech() {
+        val result = NotificationHistoryInterpreter().interpret(
+            rawEvent(packageName = "com.android.systemui", category = "status", title = "Charging", text = "Connected")
+        )
+
+        assertEquals(NotificationHistoryInterpretationAction.IGNORE, result.action)
+        assertEquals("IGNORE_SYSTEM", result.reason)
+        assertFalse(result.shouldWriteHistory)
+        assertFalse(result.shouldSpeak)
+        assertNull(result.record)
+    }
+
+    @Test
+    fun serviceNotificationIsIgnoredForHistoryAndSpeech() {
+        val result = NotificationHistoryInterpreter().interpret(
+            rawEvent(packageName = "com.example.widget", category = "service", title = "Widget", text = "Updating widget")
+        )
+
+        assertEquals(NotificationHistoryInterpretationAction.IGNORE, result.action)
+        assertEquals("IGNORE_SERVICE", result.reason)
+        assertFalse(result.shouldWriteHistory)
+        assertFalse(result.shouldSpeak)
+        assertNull(result.record)
+    }
+
+    @Test
+    fun meaningfulK9EmailIsAllowed() {
+        val result = NotificationHistoryInterpreter().interpret(
+            rawEvent(packageName = "com.fsck.k9", category = "email", title = "Inbox", text = "New mail")
+        )
+
+        assertEquals(NotificationHistoryInterpretationAction.CREATE, result.action)
+        assertTrue(result.shouldWriteHistory)
+        assertTrue(result.shouldSpeak)
+    }
+
+    @Test
+    fun meaningfulYouTubeNotificationIsAllowed() {
+        val result = NotificationHistoryInterpreter().interpret(
+            rawEvent(packageName = "com.google.android.youtube", category = "social", title = "Channel", text = "New video")
+        )
+
+        assertEquals(NotificationHistoryInterpretationAction.CREATE, result.action)
+        assertTrue(result.shouldWriteHistory)
+        assertTrue(result.shouldSpeak)
+    }
+
+    @Test
+    fun ordinaryNotificationWithUnknownCategoryIsAllowed() {
+        val result = NotificationHistoryInterpreter().interpret(
+            rawEvent(packageName = "com.example.app", category = "", title = "Notice", text = "Hello")
+        )
+
+        assertEquals(NotificationHistoryInterpretationAction.CREATE, result.action)
+        assertTrue(result.shouldWriteHistory)
+        assertTrue(result.shouldSpeak)
     }
 
     private fun rawEvent(
