@@ -51,9 +51,14 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
 
         DebugLogStore.add(sbn.key, "EXTRACTED", rawEventMessage(rawEvent))
         val interpretation = historyInterpreter.interpret(rawEvent)
-        DebugLogStore.add(sbn.key, interpretation.action.name, interpretationMessage(interpretation, rawEvent))
+        if (interpretation.action != NotificationHistoryInterpretationAction.SKIPPED) {
+            DebugLogStore.add(sbn.key, interpretation.action.name, interpretationMessage(interpretation, rawEvent))
+        }
         when (interpretation.action) {
             NotificationHistoryInterpretationAction.IGNORE -> {
+                DebugLogStore.add(sbn.key, "SKIPPED", skippedInterpretationMessage(interpretation, rawEvent))
+            }
+            NotificationHistoryInterpretationAction.SKIPPED -> {
                 DebugLogStore.add(sbn.key, "SKIPPED", skippedInterpretationMessage(interpretation, rawEvent))
             }
             NotificationHistoryInterpretationAction.CREATE,
@@ -134,7 +139,7 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
         return "action=" + interpretation.action.name + " | reason=" + interpretation.reason +
             " | explanation=" + interpretation.explanation + " | " +
             "notificationKey=" + event.notificationKey + " | packageName=" + event.packageName +
-            " | category=" + event.category
+            " | category=" + event.category + historyDuplicateMessage(interpretation)
     }
 
     private fun skippedInterpretationMessage(
@@ -144,7 +149,14 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
         return "action=" + interpretation.action.name + " | reason=" + interpretation.reason +
             " | explanation=" + interpretation.explanation + " | " +
             "notificationKey=" + event.notificationKey + " | packageName=" + event.packageName +
-            " | category=" + event.category
+            " | category=" + event.category + historyDuplicateMessage(interpretation)
+    }
+
+    private fun historyDuplicateMessage(interpretation: NotificationHistoryInterpretation): String {
+        val fingerprintHash = interpretation.historyFingerprintHash ?: return ""
+        val ageMillis = interpretation.matchingRecordAgeMillis
+        return " | historyFingerprintHash=$fingerprintHash" +
+            if (ageMillis != null) " | matchingRecordAgeMillis=$ageMillis" else ""
     }
 
     private fun receivedMessage(sbn: StatusBarNotification): String {

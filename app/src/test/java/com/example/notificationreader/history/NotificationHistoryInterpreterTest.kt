@@ -49,27 +49,144 @@ class NotificationHistoryInterpreterTest {
 
     @Test
     fun identicalRepeatedRawEventWithinWindowDoesNotCreateDuplicateHistoryRecord() {
-        val interpreter = NotificationHistoryInterpreter(duplicateWindowMillis = 5_000L)
+        val interpreter = NotificationHistoryInterpreter(duplicateWindowMillis = 15.minutesMillis)
         val first = interpreter.interpret(rawEvent(receivedAt = 10_000L))
         val second = interpreter.interpret(rawEvent(receivedAt = 12_000L))
-        val storedRecords = listOf(first, second)
-            .mapNotNull { it.record }
-            .distinctBy { it.storageKey }
 
         assertEquals(NotificationHistoryInterpretationAction.CREATE, first.action)
-        assertEquals(NotificationHistoryInterpretationAction.UPDATE, second.action)
-        assertEquals("DUPLICATE_WITHIN_WINDOW", second.reason)
-        assertEquals(1, storedRecords.size)
+        assertEquals(NotificationHistoryInterpretationAction.SKIPPED, second.action)
+        assertEquals("DUPLICATE_CONTENT_WITHIN_WINDOW", second.reason)
+        assertFalse(second.shouldWriteHistory)
+        assertTrue(second.shouldSpeak)
+        assertEquals(1, storedRecordCount(first, second))
+    }
+
+    @Test
+    fun identicalContentWithDifferentNotificationIdsWithinWindowDoesNotCreateDuplicateHistoryRecord() {
+        val interpreter = NotificationHistoryInterpreter(duplicateWindowMillis = 15.minutesMillis)
+        val first = interpreter.interpret(rawEvent(notificationId = 1, receivedAt = 10_000L))
+        val second = interpreter.interpret(rawEvent(notificationId = 2, receivedAt = 12_000L))
+
+        assertEquals(NotificationHistoryInterpretationAction.CREATE, first.action)
+        assertEquals(NotificationHistoryInterpretationAction.SKIPPED, second.action)
+        assertEquals(1, storedRecordCount(first, second))
+    }
+
+    @Test
+    fun identicalContentWithDifferentNotificationKeysWithinWindowDoesNotCreateDuplicateHistoryRecord() {
+        val interpreter = NotificationHistoryInterpreter(duplicateWindowMillis = 15.minutesMillis)
+        val first = interpreter.interpret(rawEvent(notificationKey = "first-key", receivedAt = 10_000L))
+        val second = interpreter.interpret(rawEvent(notificationKey = "second-key", receivedAt = 12_000L))
+
+        assertDuplicateHistorySuppressed(first, second)
+    }
+
+    @Test
+    fun identicalContentWithDifferentTagsWithinWindowDoesNotCreateDuplicateHistoryRecord() {
+        val interpreter = NotificationHistoryInterpreter(duplicateWindowMillis = 15.minutesMillis)
+        val first = interpreter.interpret(rawEvent(tag = "first-tag", receivedAt = 10_000L))
+        val second = interpreter.interpret(rawEvent(tag = "second-tag", receivedAt = 12_000L))
+
+        assertDuplicateHistorySuppressed(first, second)
+    }
+
+    @Test
+    fun identicalContentWithDifferentPostedAtWithinWindowDoesNotCreateDuplicateHistoryRecord() {
+        val interpreter = NotificationHistoryInterpreter(duplicateWindowMillis = 15.minutesMillis)
+        val first = interpreter.interpret(rawEvent(postedAt = 100L, receivedAt = 10_000L))
+        val second = interpreter.interpret(rawEvent(postedAt = 200L, receivedAt = 12_000L))
+
+        assertDuplicateHistorySuppressed(first, second)
+    }
+
+    @Test
+    fun identicalContentWithDifferentGroupSummaryStateWithinWindowDoesNotCreateDuplicateHistoryRecord() {
+        val interpreter = NotificationHistoryInterpreter(duplicateWindowMillis = 15.minutesMillis)
+        val first = interpreter.interpret(rawEvent(isGroupSummary = false, receivedAt = 10_000L))
+        val second = interpreter.interpret(rawEvent(isGroupSummary = true, receivedAt = 12_000L))
+
+        assertEquals(NotificationHistoryInterpretationAction.CREATE, first.action)
+        assertEquals(NotificationHistoryInterpretationAction.SKIPPED, second.action)
+        assertEquals(1, storedRecordCount(first, second))
+    }
+
+    @Test
+    fun identicalContentReplayedSeveralMinutesWithinWindowDoesNotCreateDuplicateHistoryRecord() {
+        val interpreter = NotificationHistoryInterpreter(duplicateWindowMillis = 15.minutesMillis)
+        val first = interpreter.interpret(rawEvent(receivedAt = 10_000L))
+        val second = interpreter.interpret(rawEvent(receivedAt = 10_000L + 7.minutesMillis))
+
+        assertDuplicateHistorySuppressed(first, second)
     }
 
     @Test
     fun identicalRawEventAfterWindowCreatesAgain() {
-        val interpreter = NotificationHistoryInterpreter(duplicateWindowMillis = 5_000L)
+        val interpreter = NotificationHistoryInterpreter(duplicateWindowMillis = 15.minutesMillis)
         val first = interpreter.interpret(rawEvent(receivedAt = 10_000L))
-        val second = interpreter.interpret(rawEvent(receivedAt = 15_001L))
+        val second = interpreter.interpret(rawEvent(receivedAt = 10_000L + 15.minutesMillis + 1L))
 
         assertEquals(NotificationHistoryInterpretationAction.CREATE, first.action)
         assertEquals(NotificationHistoryInterpretationAction.CREATE, second.action)
+        assertEquals(2, storedRecordCount(first, second))
+    }
+
+    @Test
+    fun differentTitleWithinWindowCreatesSeparateHistoryRecord() {
+        val interpreter = NotificationHistoryInterpreter(duplicateWindowMillis = 15.minutesMillis)
+        val first = interpreter.interpret(rawEvent(title = "First", receivedAt = 10_000L))
+        val second = interpreter.interpret(rawEvent(title = "Second", receivedAt = 12_000L))
+
+        assertEquals(NotificationHistoryInterpretationAction.CREATE, first.action)
+        assertEquals(NotificationHistoryInterpretationAction.CREATE, second.action)
+        assertEquals(2, storedRecordCount(first, second))
+    }
+
+    @Test
+    fun differentTextWithinWindowCreatesSeparateHistoryRecord() {
+        val interpreter = NotificationHistoryInterpreter(duplicateWindowMillis = 15.minutesMillis)
+        val first = interpreter.interpret(rawEvent(text = "First", receivedAt = 10_000L))
+        val second = interpreter.interpret(rawEvent(text = "Second", receivedAt = 12_000L))
+
+        assertEquals(NotificationHistoryInterpretationAction.CREATE, first.action)
+        assertEquals(NotificationHistoryInterpretationAction.CREATE, second.action)
+        assertEquals(2, storedRecordCount(first, second))
+    }
+
+    @Test
+    fun identicalContentFromDifferentPackagesCreatesSeparateHistoryRecords() {
+        val interpreter = NotificationHistoryInterpreter(duplicateWindowMillis = 15.minutesMillis)
+        val first = interpreter.interpret(rawEvent(packageName = "com.example.mail", receivedAt = 10_000L))
+        val second = interpreter.interpret(rawEvent(packageName = "com.other.mail", receivedAt = 12_000L))
+
+        assertEquals(NotificationHistoryInterpretationAction.CREATE, first.action)
+        assertEquals(NotificationHistoryInterpretationAction.CREATE, second.action)
+        assertEquals(2, storedRecordCount(first, second))
+    }
+
+    @Test
+    fun contentFingerprintIgnoresTechnicalNotificationFieldsAndTimestamps() {
+        val first = NotificationHistoryContentFingerprint.from(
+            rawEvent(
+                notificationKey = "first-key",
+                notificationId = 1,
+                tag = "first-tag",
+                isGroupSummary = false,
+                postedAt = 100L,
+                receivedAt = 10_000L
+            )
+        )
+        val second = NotificationHistoryContentFingerprint.from(
+            rawEvent(
+                notificationKey = "second-key",
+                notificationId = 2,
+                tag = "second-tag",
+                isGroupSummary = true,
+                postedAt = 200L,
+                receivedAt = 12_000L
+            )
+        )
+
+        assertEquals(first, second)
     }
 
     @Test
@@ -149,6 +266,25 @@ class NotificationHistoryInterpreterTest {
         assertTrue(result.shouldWriteHistory)
         assertTrue(result.shouldSpeak)
     }
+
+    private fun storedRecordCount(vararg results: NotificationHistoryInterpretation): Int {
+        return results.count { it.shouldWriteHistory }
+    }
+
+    private fun assertDuplicateHistorySuppressed(
+        first: NotificationHistoryInterpretation,
+        second: NotificationHistoryInterpretation
+    ) {
+        assertEquals(NotificationHistoryInterpretationAction.CREATE, first.action)
+        assertEquals(NotificationHistoryInterpretationAction.SKIPPED, second.action)
+        assertEquals("DUPLICATE_CONTENT_WITHIN_WINDOW", second.reason)
+        assertFalse(second.shouldWriteHistory)
+        assertTrue(second.shouldSpeak)
+        assertEquals(1, storedRecordCount(first, second))
+    }
+
+    private val Int.minutesMillis: Long
+        get() = this * 60 * 1_000L
 
     private fun rawEvent(
         receivedAt: Long = 1_000L,

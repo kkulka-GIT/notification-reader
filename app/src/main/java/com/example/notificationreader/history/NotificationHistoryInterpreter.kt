@@ -1,9 +1,8 @@
 package com.example.notificationreader.history
 
-import java.util.LinkedHashMap
-
 enum class NotificationHistoryInterpretationAction {
     IGNORE,
+    SKIPPED,
     CREATE,
     UPDATE
 }
@@ -12,19 +11,25 @@ data class NotificationHistoryInterpretation(
     val action: NotificationHistoryInterpretationAction,
     val reason: String,
     val explanation: String,
-    val record: NotificationHistoryRecord? = null
+    val record: NotificationHistoryRecord? = null,
+    val historyFingerprintHash: String? = null,
+    val matchingRecordAgeMillis: Long? = null
 ) {
     val shouldWriteHistory: Boolean
-        get() = action != NotificationHistoryInterpretationAction.IGNORE && record != null
+        get() = record != null &&
+            (
+                action == NotificationHistoryInterpretationAction.CREATE ||
+                    action == NotificationHistoryInterpretationAction.UPDATE
+                )
 
     val shouldSpeak: Boolean
         get() = action != NotificationHistoryInterpretationAction.IGNORE
 }
 
 class NotificationHistoryInterpreter(
-    private val duplicateWindowMillis: Long = DEFAULT_DUPLICATE_WINDOW_MILLIS
+    duplicateWindowMillis: Long = DEFAULT_DUPLICATE_WINDOW_MILLIS
 ) {
-    private val recentMeaningfulEvents = LinkedHashMap<String, Long>()
+    private val contentDuplicatePolicy = NotificationHistoryContentDuplicatePolicy(duplicateWindowMillis)
 
     @Synchronized
     fun interpret(event: RawNotificationEvent): NotificationHistoryInterpretation {
@@ -49,21 +54,19 @@ class NotificationHistoryInterpreter(
             )
         }
 
-        val storageKey = NotificationHistoryStorageKey.from(event)
-        trimOldEvents(event.receivedAt)
-        val lastSeenAt = recentMeaningfulEvents[storageKey]
-        recentMeaningfulEvents[storageKey] = event.receivedAt
-
-        val record = event.toHistoryRecord(storageKey)
-        if (lastSeenAt != null && event.receivedAt - lastSeenAt <= duplicateWindowMillis) {
+        val duplicateMatch = contentDuplicatePolicy.evaluate(event)
+        if (duplicateMatch != null) {
             return NotificationHistoryInterpretation(
-                action = NotificationHistoryInterpretationAction.UPDATE,
-                reason = "DUPLICATE_WITHIN_WINDOW",
-                explanation = "Repeated meaningful notification updates the existing history record",
-                record = record
+                action = NotificationHistoryInterpretationAction.SKIPPED,
+                reason = "DUPLICATE_CONTENT_WITHIN_WINDOW",
+                explanation = "Meaningful content from the same package was already stored within the history duplicate window",
+                historyFingerprintHash = duplicateMatch.fingerprint.safeHash(),
+                matchingRecordAgeMillis = duplicateMatch.ageMillis
             )
         }
 
+        val storageKey = NotificationHistoryStorageKey.from(event)
+        val record = event.toHistoryRecord(storageKey)
         return NotificationHistoryInterpretation(
             action = NotificationHistoryInterpretationAction.CREATE,
             reason = "MEANINGFUL_NOTIFICATION",
@@ -78,16 +81,6 @@ class NotificationHistoryInterpreter(
             reason = reason,
             explanation = explanation
         )
-    }
-
-    private fun trimOldEvents(nowMillis: Long) {
-        val iterator = recentMeaningfulEvents.iterator()
-        while (iterator.hasNext()) {
-            val entry = iterator.next()
-            if (nowMillis - entry.value > duplicateWindowMillis) {
-                iterator.remove()
-            }
-        }
     }
 
     private fun RawNotificationEvent.toHistoryRecord(storageKey: String): NotificationHistoryRecord {
@@ -107,7 +100,8 @@ class NotificationHistoryInterpreter(
     }
 
     companion object {
-        const val DEFAULT_DUPLICATE_WINDOW_MILLIS = 5_000L
+        const val DEFAULT_DUPLICATE_WINDOW_MILLIS =
+            NotificationHistoryContentDuplicatePolicy.DEFAULT_DUPLICATE_CONTENT_WINDOW_MILLIS
         private const val SYSTEM_UI_PACKAGE_NAME = "com.android.systemui"
         private const val SERVICE_CATEGORY = "service"
     }

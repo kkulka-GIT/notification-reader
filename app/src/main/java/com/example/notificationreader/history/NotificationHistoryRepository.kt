@@ -20,6 +20,16 @@ class NotificationHistoryRepository private constructor(context: Context) {
 
     fun save(record: NotificationHistoryRecord): Boolean {
         val db = database.writableDatabase
+        val contentDuplicate = findRecentContentDuplicate(db, record)
+        if (contentDuplicate != null) {
+            DebugLogStore.add(
+                record.notificationKey,
+                "SKIPPED",
+                duplicateContentLogMessage(record, contentDuplicate)
+            )
+            return false
+        }
+
         val inserted = db.insertWithOnConflict(
             TABLE,
             null,
@@ -55,6 +65,11 @@ class NotificationHistoryRepository private constructor(context: Context) {
             }
         }
     }
+
+    private data class ExistingContentDuplicate(
+        val record: NotificationHistoryRecord,
+        val ageMillis: Long
+    )
 
     fun newest(limit: Int = NotificationHistoryLimitPolicy.MAX_RECORDS): List<NotificationHistoryRecord> {
         return queryRecords(
@@ -167,8 +182,51 @@ class NotificationHistoryRepository private constructor(context: Context) {
         }
     }
 
+    private fun findRecentContentDuplicate(
+        db: SQLiteDatabase,
+        incoming: NotificationHistoryRecord
+    ): ExistingContentDuplicate? {
+        val lowerBoundSavedAt = incoming.savedAt -
+            NotificationHistoryContentDuplicatePolicy.DEFAULT_DUPLICATE_CONTENT_WINDOW_MILLIS
+        val incomingFingerprint = NotificationHistoryContentFingerprint.from(incoming)
+        val cursor = db.query(
+            TABLE,
+            RECORD_COLUMNS,
+            "package_name = ? AND saved_at >= ? AND saved_at <= ?",
+            arrayOf(incoming.packageName, lowerBoundSavedAt.toString(), incoming.savedAt.toString()),
+            null,
+            null,
+            "saved_at ASC, id ASC",
+            null
+        )
+        return cursor.use { c ->
+            while (c.moveToNext()) {
+                val existing = c.toRecord()
+                if (NotificationHistoryContentFingerprint.from(existing) == incomingFingerprint) {
+                    return@use ExistingContentDuplicate(
+                        record = existing,
+                        ageMillis = incoming.savedAt - existing.savedAt
+                    )
+                }
+            }
+            null
+        }
+    }
+
     private fun historyLogMessage(record: NotificationHistoryRecord): String {
         return "${record.packageName} | ${record.title} | ${record.text} | storageKey=${record.storageKey}"
+    }
+
+    private fun duplicateContentLogMessage(
+        record: NotificationHistoryRecord,
+        duplicate: ExistingContentDuplicate
+    ): String {
+        return "action=SKIPPED | reason=DUPLICATE_CONTENT_WITHIN_WINDOW" +
+            " | packageName=${record.packageName}" +
+            " | notificationKey=${record.notificationKey}" +
+            " | historyFingerprintHash=${NotificationHistoryContentFingerprint.from(record).safeHash()}" +
+            " | matchingRecordAgeMillis=${duplicate.ageMillis}" +
+            " | matchingRecordId=${duplicate.record.id}"
     }
 
     private fun trimToLimit(db: SQLiteDatabase) {
