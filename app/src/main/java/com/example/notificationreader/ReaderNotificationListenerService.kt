@@ -4,6 +4,10 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.speech.tts.TextToSpeech
 import com.example.notificationreader.debug.DebugLogStore
+import com.example.notificationreader.decision.NotificationDecision
+import com.example.notificationreader.decision.NotificationDecisionCoordinator
+import com.example.notificationreader.decision.NotificationDecisionLogFormatter
+import com.example.notificationreader.decision.NotificationSpeechSelection
 import com.example.notificationreader.history.NotificationHistoryExtractor
 import com.example.notificationreader.history.NotificationHistoryInterpretation
 import com.example.notificationreader.history.NotificationHistoryInterpretationAction
@@ -20,6 +24,7 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
     private val pendingMessages = ArrayDeque<String>()
     private val speechDuplicatePolicy = NotificationSpeechDuplicatePolicy()
     private val historyInterpreter = NotificationHistoryInterpreter()
+    private val decisionCoordinator = NotificationDecisionCoordinator()
     private lateinit var historyRepository: NotificationHistoryRepository
 
     override fun onCreate() {
@@ -69,12 +74,28 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
             }
         }
 
-        if (!interpretation.shouldSpeak) return
-        if (!NotificationSpeechPrefs.isSpeakingEnabled(applicationContext)) return
+        if (!interpretation.shouldSpeak) {
+            logDecision(sbn.key, rawEvent, decisionCoordinator.decide(rawEvent, interpretation))
+            return
+        }
+        if (!NotificationSpeechPrefs.isSpeakingEnabled(applicationContext)) {
+            logDecision(
+                sbn.key,
+                rawEvent,
+                decisionCoordinator.decide(
+                    event = rawEvent,
+                    historyInterpretation = interpretation,
+                    speechPrefsEnabled = false
+                )
+            )
+            return
+        }
         val speechFingerprint = NotificationSpeechFingerprint.fromStatusBarNotification(sbn)
-        when (speechDuplicatePolicy.evaluate(sbn.key, speechFingerprint)) {
+        val speechDuplicateDecision = speechDuplicatePolicy.evaluate(sbn.key, speechFingerprint)
+        when (speechDuplicateDecision) {
             NotificationSpeechDuplicateDecision.Allow -> Unit
             NotificationSpeechDuplicateDecision.DuplicateNotificationKey -> {
+                logDecision(sbn.key, rawEvent, decisionCoordinator.decide(rawEvent, interpretation, speechDuplicateDecision))
                 DebugLogStore.add(
                     sbn.key,
                     "SKIPPED",
@@ -83,6 +104,7 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
                 return
             }
             NotificationSpeechDuplicateDecision.DuplicateFingerprintWithinWindow -> {
+                logDecision(sbn.key, rawEvent, decisionCoordinator.decide(rawEvent, interpretation, speechDuplicateDecision))
                 DebugLogStore.add(
                     sbn.key,
                     "SKIPPED",
@@ -92,13 +114,29 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
             }
         }
 
-        val speechMessage = MessageNotificationSpeechPath.messageFor(sbn) ?: NotificationAnnouncementMapper.messageFor(sbn)
+        val messageSpeechResult = MessageNotificationSpeechPath.resultFor(sbn)
+        val speechSelection = if (messageSpeechResult != null) {
+            NotificationSpeechSelection(
+                text = messageSpeechResult.text,
+                templateId = "MESSAGE_" + messageSpeechResult.variant.name
+            )
+        } else {
+            NotificationSpeechSelection(
+                text = NotificationAnnouncementMapper.messageFor(sbn),
+                templateId = "ANNOUNCEMENT_FALLBACK"
+            )
+        }
+        logDecision(
+            sbn.key,
+            rawEvent,
+            decisionCoordinator.decide(rawEvent, interpretation, speechDuplicateDecision, speechSelection)
+        )
         DebugLogStore.add(
             sbn.key,
             "SPOKEN",
-            speechMessage + " | notificationKey=${sbn.key} | speechFingerprint=" + speechFingerprint
+            speechSelection.text + " | notificationKey=${sbn.key} | speechFingerprint=" + speechFingerprint
         )
-        speak(speechMessage)
+        speak(speechSelection.text)
     }
 
     override fun onDestroy() {
@@ -129,6 +167,16 @@ class ReaderNotificationListenerService : NotificationListenerService(), TextToS
     private fun trimPendingMessages() {
         while (pendingMessages.size > MAX_PENDING_MESSAGES) {
             pendingMessages.removeFirst()
+        }
+    }
+
+    private fun logDecision(
+        notificationKey: String,
+        event: RawNotificationEvent,
+        decision: NotificationDecision
+    ) {
+        NotificationDecisionLogFormatter.diagnosticEntries(event, decision).forEach { entry ->
+            DebugLogStore.add(notificationKey, entry.stage, entry.message)
         }
     }
 
